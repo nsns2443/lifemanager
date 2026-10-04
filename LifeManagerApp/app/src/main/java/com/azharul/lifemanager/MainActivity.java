@@ -76,6 +76,13 @@ public class MainActivity extends Activity {
                     mine = su.isEmpty() ? "" : (Uri.parse(su).getHost() == null ? "" : Uri.parse(su).getHost());
                 } catch (Exception ignored) {
                 }
+                if (isWeb && host.endsWith("blogspot.com")) {
+                    String fixed = fixBlog(u.toString());
+                    if (!fixed.equals(u.toString())) {
+                        view.loadUrl(fixed);
+                        return true;
+                    }
+                }
                 if (isWeb && (google || (!mine.isEmpty() && host.equals(mine)))) return false;
                 try {
                     startActivity(new Intent(Intent.ACTION_VIEW, u));
@@ -119,12 +126,30 @@ public class MainActivity extends Activity {
         if (url.isEmpty()) {
             showUrlDialog("আপনার অ্যাপের ঠিকানা (…/exec) পেস্ট করুন");
         } else {
-            web.loadUrl(url);
+            web.loadUrl(fixBlog(url));
         }
     }
 
     private SharedPreferences cfg() {
         return getSharedPreferences("cfg", Context.MODE_PRIVATE);
+    }
+
+    /** Blogspot-এর মোবাইল সংস্করণ (?m=1) বন্ধ করে ডেস্কটপ সংস্করণ (?m=0) খোলায় */
+    static String fixBlog(String url) {
+        try {
+            Uri u = Uri.parse(url);
+            String h = u.getHost() == null ? "" : u.getHost();
+            if (!h.endsWith("blogspot.com")) return url;
+            if ("0".equals(u.getQueryParameter("m"))) return url;
+            Uri.Builder b = u.buildUpon().clearQuery();
+            for (String n : u.getQueryParameterNames()) {
+                if (!n.equals("m")) b.appendQueryParameter(n, u.getQueryParameter(n));
+            }
+            b.appendQueryParameter("m", "0");
+            return b.build().toString();
+        } catch (Exception e) {
+            return url;
+        }
     }
 
     private String getSavedUrl() {
@@ -154,7 +179,7 @@ public class MainActivity extends Activity {
                         return;
                     }
                     cfg().edit().putString("url", u).apply();
-                    web.loadUrl(u);
+                    web.loadUrl(fixBlog(u));
                 })
                 .show();
     }
@@ -166,7 +191,7 @@ public class MainActivity extends Activity {
                 .setPositiveButton("আবার চেষ্টা", (d, w) -> {
                     errorShown = false;
                     String u = getSavedUrl();
-                    if (!u.isEmpty()) web.loadUrl(u);
+                    if (!u.isEmpty()) web.loadUrl(fixBlog(u));
                 })
                 .setNeutralButton("ঠিকানা বদলান", (d, w) -> showUrlDialog("সঠিক ঠিকানা (…/exec) পেস্ট করুন"))
                 .setNegativeButton("বন্ধ", (d, w) -> errorShown = false)
