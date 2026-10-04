@@ -216,6 +216,12 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
+        public void setWidget(String json) {
+            TaskWidget.save(MainActivity.this, json);
+            TaskWidget.refreshAll(MainActivity.this);
+        }
+
+        @JavascriptInterface
         public void clearReminders() {
             Reminders.cancelAll(MainActivity.this);
         }
