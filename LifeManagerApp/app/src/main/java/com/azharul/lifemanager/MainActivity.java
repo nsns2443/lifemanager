@@ -67,8 +67,15 @@ public class MainActivity extends Activity {
                 String scheme = u.getScheme() == null ? "" : u.getScheme();
                 String host = u.getHost() == null ? "" : u.getHost();
                 boolean isWeb = scheme.equals("http") || scheme.equals("https");
-                boolean google = host.endsWith("google.com") || host.endsWith("googleusercontent.com");
-                if (isWeb && google) return false;
+                boolean google = host.endsWith("google.com") || host.endsWith("googleusercontent.com")
+                        || host.endsWith("blogspot.com") || host.endsWith("blogger.com");
+                String mine = "";
+                try {
+                    String su = getSavedUrl();
+                    mine = su.isEmpty() ? "" : (Uri.parse(su).getHost() == null ? "" : Uri.parse(su).getHost());
+                } catch (Exception ignored) {
+                }
+                if (isWeb && (google || (!mine.isEmpty() && host.equals(mine)))) return false;
                 try {
                     startActivity(new Intent(Intent.ACTION_VIEW, u));
                 } catch (Exception ignored) {
