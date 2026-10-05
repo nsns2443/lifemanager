@@ -65,6 +65,7 @@ public class TaskWidget extends AppWidgetProvider {
             if (h > 100) hDp = h;
         } catch (Exception ignored) {
         }
+        refreshLocation(c);
         RemoteViews v = new RemoteViews(c.getPackageName(), R.layout.widget);
         int infoW = wDp - 12, infoH = hDp - 46 - 10;
         try {
@@ -123,6 +124,60 @@ public class TaskWidget extends AppWidgetProvider {
             am.set(AlarmManager.RTC, next, pi);
         } catch (Throwable ignored) {
         }
+    }
+
+    /** ফোনের সর্বশেষ জানা অবস্থান নিয়ে রাখে; জায়গা বদলালে শহরের নাম নতুন করে বের করে */
+    static void refreshLocation(final Context c) {
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= 23
+                    && c.checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION) != android.content.pm.PackageManager.PERMISSION_GRANTED) return;
+            android.location.LocationManager lm = (android.location.LocationManager) c.getSystemService(Context.LOCATION_SERVICE);
+            android.location.Location best = null;
+            for (String pr : lm.getProviders(true)) {
+                android.location.Location l = lm.getLastKnownLocation(pr);
+                if (l != null && (best == null || l.getTime() > best.getTime())) best = l;
+            }
+            if (best == null) return;
+            final double lat = best.getLatitude(), lng = best.getLongitude();
+            android.content.SharedPreferences sp = c.getSharedPreferences("loc", Context.MODE_PRIVATE);
+            boolean had = sp.contains("lat");
+            double[] old = location(c);
+            double dy = (lat - old[0]) * 111, dx = (lng - old[1]) * 111 * Math.cos(Math.toRadians(lat));
+            boolean moved = !had || Math.sqrt(dx * dx + dy * dy) > 5;
+            if (!moved) return;
+            saveLocation(c, lat, lng);
+            sp.edit().putString("city", "").apply();
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        android.location.Geocoder g = new android.location.Geocoder(c, new java.util.Locale("bn", "BD"));
+                        java.util.List<android.location.Address> l = g.getFromLocation(lat, lng, 1);
+                        if (l != null && !l.isEmpty()) {
+                            android.location.Address a = l.get(0);
+                            String n = a.getLocality();
+                            if (n == null) n = a.getSubAdminArea();
+                            if (n == null) n = a.getAdminArea();
+                            if (n == null) n = a.getCountryName();
+                            if (n != null && !n.isEmpty()) {
+                                c.getSharedPreferences("loc", Context.MODE_PRIVATE).edit().putString("city", n).apply();
+                            }
+                        }
+                    } catch (Throwable ignored) {
+                    }
+                    try {
+                        refreshAll(c);
+                    } catch (Throwable ignored) {
+                    }
+                }
+            }).start();
+        } catch (Throwable ignored) {
+        }
+    }
+
+    static String city(Context c, double[] loc) {
+        String n = c.getSharedPreferences("loc", Context.MODE_PRIVATE).getString("city", "");
+        return (n == null || n.isEmpty()) ? Islamic.cityName(loc[0], loc[1]) : n;
     }
 
     /** সংরক্ষিত অবস্থান (না থাকলে খুলনা) */
@@ -273,7 +328,7 @@ public class TaskWidget extends AppWidgetProvider {
         cv.drawText(ell("সূর্যাস্ত " + Islamic.fmt(t[4]), p, W - rx - 4), rx, 31, p);
         p.setColor(0xFFFBD3E5);
         p.setTextSize(10.5f);
-        cv.drawText(ell(Islamic.cityName(loc[0], loc[1]), p, W - rx - 4), rx, 44, p);
+        cv.drawText(ell(city(c, loc), p, W - rx - 4), rx, 44, p);
 
         // পাঁচ ওয়াক্ত
         String[] names = {"ফজর", "যোহর", "আসর", "মাগরিব", "ইশা"};

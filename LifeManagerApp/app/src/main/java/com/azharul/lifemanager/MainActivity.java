@@ -216,21 +216,8 @@ public class MainActivity extends Activity {
 
     /** ফোনের সর্বশেষ জানা অবস্থান নিয়ে নামাজের সময়ের জন্য রাখে */
     private void updateLocation() {
-        try {
-            if (Build.VERSION.SDK_INT >= 23
-                    && checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) return;
-            android.location.LocationManager lm = (android.location.LocationManager) getSystemService(Context.LOCATION_SERVICE);
-            android.location.Location best = null;
-            for (String pr : lm.getProviders(true)) {
-                android.location.Location l = lm.getLastKnownLocation(pr);
-                if (l != null && (best == null || l.getTime() > best.getTime())) best = l;
-            }
-            if (best != null) {
-                TaskWidget.saveLocation(this, best.getLatitude(), best.getLongitude());
-                TaskWidget.refreshAll(this);
-            }
-        } catch (Throwable ignored) {
-        }
+        TaskWidget.refreshLocation(this);
+        TaskWidget.refreshAll(this);
     }
 
     @Override
@@ -277,7 +264,7 @@ public class MainActivity extends Activity {
                             try {
                                 android.print.PrintManager pm = (android.print.PrintManager) getSystemService(Context.PRINT_SERVICE);
                                 String name = (title == null || title.isEmpty()) ? "রিপোর্ট" : title;
-                                pm.print(name, view.createPrintDocumentAdapter(name), new android.print.PrintAttributes.Builder().build());
+                                pm.print(name, view.createPrintDocumentAdapter(name), new android.print.PrintAttributes.Builder().setMediaSize(android.print.PrintAttributes.MediaSize.ISO_A4).setMinMargins(new android.print.PrintAttributes.Margins(450, 450, 450, 450)).setColorMode(android.print.PrintAttributes.COLOR_MODE_COLOR).build());
                             } catch (Throwable t) {
                                 Toast.makeText(MainActivity.this, "প্রিন্ট চালু করা যায়নি", Toast.LENGTH_LONG).show();
                             }
