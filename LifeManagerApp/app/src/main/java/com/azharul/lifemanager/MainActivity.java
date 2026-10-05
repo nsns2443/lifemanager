@@ -33,6 +33,8 @@ public class MainActivity extends Activity {
     private static final int REQ_FILE = 11;
     private static final int REQ_NOTIF = 12;
 
+    static volatile String pendingGo = "";
+    private WebView printWeb;
     private WebView web;
     private ValueCallback<Uri[]> fileCb;
     private boolean errorShown = false;
@@ -42,6 +44,7 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         getWindow().setStatusBarColor(Color.parseColor("#2563EB"));
         TaskWidget.ensureFont(this);
+        readGo(getIntent());
 
         web = new WebView(this);
         web.setLayoutParams(new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -199,10 +202,93 @@ public class MainActivity extends Activity {
     }
 
     private void askNotificationPermission() {
+        java.util.ArrayList<String> need = new java.util.ArrayList<>();
         if (Build.VERSION.SDK_INT >= 33
                 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQ_NOTIF);
+            need.add(Manifest.permission.POST_NOTIFICATIONS);
         }
+        if (Build.VERSION.SDK_INT >= 23
+                && checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            need.add(Manifest.permission.ACCESS_COARSE_LOCATION);
+        }
+        if (!need.isEmpty()) requestPermissions(need.toArray(new String[0]), REQ_NOTIF);
+    }
+
+    /** ফোনের সর্বশেষ জানা অবস্থান নিয়ে নামাজের সময়ের জন্য রাখে */
+    private void updateLocation() {
+        try {
+            if (Build.VERSION.SDK_INT >= 23
+                    && checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) return;
+            android.location.LocationManager lm = (android.location.LocationManager) getSystemService(Context.LOCATION_SERVICE);
+            android.location.Location best = null;
+            for (String pr : lm.getProviders(true)) {
+                android.location.Location l = lm.getLastKnownLocation(pr);
+                if (l != null && (best == null || l.getTime() > best.getTime())) best = l;
+            }
+            if (best != null) {
+                TaskWidget.saveLocation(this, best.getLatitude(), best.getLongitude());
+                TaskWidget.refreshAll(this);
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int code, String[] perms, int[] res) {
+        super.onRequestPermissionsResult(code, perms, res);
+        updateLocation();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        updateLocation();
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        readGo(intent);
+    }
+
+    private void readGo(Intent intent) {
+        try {
+            String g = intent == null ? null : intent.getStringExtra("go");
+            if (g != null && !g.isEmpty()) {
+                pendingGo = g;
+                intent.removeExtra("go");
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** রিপোর্টের HTML থেকে PDF/প্রিন্ট (ফোনের "Save as PDF" দিয়ে) */
+    private void printHtml(final String html, final String title) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    printWeb = new WebView(MainActivity.this);
+                    printWeb.getSettings().setJavaScriptEnabled(false);
+                    printWeb.setWebViewClient(new WebViewClient() {
+                        @Override
+                        public void onPageFinished(WebView view, String url) {
+                            try {
+                                android.print.PrintManager pm = (android.print.PrintManager) getSystemService(Context.PRINT_SERVICE);
+                                String name = (title == null || title.isEmpty()) ? "রিপোর্ট" : title;
+                                pm.print(name, view.createPrintDocumentAdapter(name), new android.print.PrintAttributes.Builder().build());
+                            } catch (Throwable t) {
+                                Toast.makeText(MainActivity.this, "প্রিন্ট চালু করা যায়নি", Toast.LENGTH_LONG).show();
+                            }
+                        }
+                    });
+                    printWeb.loadDataWithBaseURL("https://localhost/", html, "text/html", "UTF-8", null);
+                } catch (Throwable t) {
+                    Toast.makeText(MainActivity.this, "প্রিন্ট চালু করা যায়নি", Toast.LENGTH_LONG).show();
+                }
+            }
+        });
     }
 
     @Override
@@ -245,6 +331,18 @@ public class MainActivity extends Activity {
         public void setWidget(String json) {
             TaskWidget.save(MainActivity.this, json);
             TaskWidget.refreshAll(MainActivity.this);
+        }
+
+        @JavascriptInterface
+        public String takeAction() {
+            String g = pendingGo;
+            pendingGo = "";
+            return g == null ? "" : g;
+        }
+
+        @JavascriptInterface
+        public void printHtml(String html, String title) {
+            MainActivity.this.printHtml(html, title);
         }
 
         @JavascriptInterface
