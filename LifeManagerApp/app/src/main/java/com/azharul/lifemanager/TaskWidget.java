@@ -159,6 +159,7 @@ public class TaskWidget extends AppWidgetProvider {
     /** পরের নামাজের সময় বা মধ্যরাতে উইজেট নিজে নতুন করে আঁকবে */
     static void scheduleRefresh(Context c) {
         try {
+            loadAsr(c);
             double[] loc = location(c);
             TimeZone zone = tzOf(c);
             Calendar now = Calendar.getInstance(zone);
@@ -241,6 +242,15 @@ public class TaskWidget extends AppWidgetProvider {
 
     static boolean manual(Context c) {
         return c.getSharedPreferences("loc", Context.MODE_PRIVATE).getBoolean("manual", false);
+    }
+
+    static void loadAsr(Context c) {
+        try { Islamic.asrFactor = c.getSharedPreferences("loc", Context.MODE_PRIVATE).getInt("asr", 2) == 1 ? 1 : 2; } catch (Throwable ignored) { }
+    }
+
+    static void setAsr(Context c, int f) {
+        c.getSharedPreferences("loc", Context.MODE_PRIVATE).edit().putInt("asr", f == 1 ? 1 : 2).apply();
+        Islamic.asrFactor = f == 1 ? 1 : 2;
     }
 
     static TimeZone tzOf(Context c) {
@@ -534,7 +544,11 @@ public class TaskWidget extends AppWidgetProvider {
         Calendar now = Calendar.getInstance(zone);
         double[] loc = location(c);
         double tz = zone.getOffset(now.getTimeInMillis()) / 3600000.0;
+        loadAsr(c);
         double[] t = Islamic.prayer(now, loc[0], loc[1], tz);
+        Calendar tmr = (Calendar) now.clone();
+        tmr.add(Calendar.DAY_OF_MONTH, 1);
+        double nextFajr = Islamic.prayer(tmr, loc[0], loc[1], tz)[0];
 
         // ---- হেডার: ঠিক মাঝখানে দাগ, দুই পাশেই লেখা মাঝ বরাবর ----
         float mid = W / 2f;
@@ -563,6 +577,7 @@ public class TaskWidget extends AppWidgetProvider {
         // ---- পাঁচ ওয়াক্ত ----
         String[] names = {"ফজর", "যোহর", "আসর", "মাগরিব", "ইশা"};
         double[] pt = {t[0], t[2], t[3], t[4], t[5]};
+        double[] pe = {t[1], t[3], t[4], t[5], nextFajr};
         double nowH = now.get(Calendar.HOUR_OF_DAY) + now.get(Calendar.MINUTE) / 60.0;
         int next = 0;
         for (int i = 0; i < 5; i++) { if (pt[i] > nowH) { next = i; break; } if (i == 4) next = 0; }
@@ -576,10 +591,13 @@ public class TaskWidget extends AppWidgetProvider {
             cv.drawRoundRect(new RectF(x0, top, x0 + pw, top + ph), 9, 9, bg);
             p.setTypeface(reg);
             p.setColor(on ? 0xFFB0145C : 0xFFFBD3E5);
-            ctext(cv, p, names[i], x0 + pw / 2, top + 13, pw - 4, 10, 8);
+            ctext(cv, p, names[i], x0 + pw / 2, top + 12, pw - 4, 10, 8);
             p.setTypeface(bold);
             p.setColor(on ? 0xFF1A1A1F : 0xFFFFFFFF);
-            ctext(cv, p, Islamic.fmt(pt[i]), x0 + pw / 2, top + 27, pw - 4, 11.5f, 8.5f);
+            ctext(cv, p, Islamic.fmt(pt[i]), x0 + pw / 2, top + 23, pw - 4, 11.5f, 8.5f);
+            p.setTypeface(reg);
+            p.setColor(on ? 0xFF6B6B75 : 0xFFFBD3E5);
+            ctext(cv, p, "শেষ " + Islamic.fmt(pe[i]), x0 + pw / 2, top + 31, pw - 4, 7.5f, 5.5f);
         }
 
         // ---- বিভাজক ----
@@ -587,34 +605,30 @@ public class TaskWidget extends AppWidgetProvider {
         cv.drawRect(pad + 6, y, W - pad - 6, y + 1, ln);
         float areaTop = y + 1, areaH = H - areaTop - 3;
 
-        // ---- কাজ: দাগের নিচের ফাঁকা জায়গার ঠিক মাঝখানে ----
-        float cx = W / 2f, maxW = W - pad * 2;
+        // ---- কাজ: বামে আজকের, মাঝে দাগ, ডানে আগামী ৭ দিনের ----
+        float halfW = W / 2f;
+        float lx = halfW / 2f, rx = halfW + halfW / 2f, colW = halfW - pad - 6;
         p.setTextAlign(Paint.Align.CENTER);
         if (!empty.isEmpty()) {
             p.setTypeface(reg);
             p.setColor(0xFFFBD3E5);
-            ctext(cv, p, empty, cx, areaTop + areaH / 2f + 4, maxW, 12.5f, 9);
+            ctext(cv, p, empty, W / 2f, areaTop + areaH / 2f + 4, W - pad * 2, 12.5f, 9);
             return bmp;
         }
-        int cap = (int) Math.max(2, Math.floor((areaH - 44) / 14f));
-        int uCap = Math.max(1, cap / 2), tCap = Math.max(1, cap - uCap);
-        if (up.length == 0) { uCap = 1; tCap = Math.max(1, cap - 1); }
-        else if (today.length == 0) { tCap = 1; uCap = Math.max(1, cap - 1); }
-        else if (today.length < tCap) { uCap = Math.min(up.length, cap - today.length); }
-        int tl = Math.max(1, Math.min(today.length, tCap)), ul = Math.max(1, Math.min(up.length, uCap));
-        float block = 16 + tl * 14f + 8 + 16 + ul * 14f;
-        y = areaTop + Math.max(0, (areaH - block) / 2f);
-
-        y += 13;
+        int cap = (int) Math.max(1, Math.floor((areaH - 22) / 14f));
+        int tl = Math.max(1, Math.min(today.length, cap)), ul = Math.max(1, Math.min(up.length, cap));
+        int rows = Math.max(tl, ul);
+        float block = 16 + rows * 14f;
+        float y0 = areaTop + Math.max(0, (areaH - block) / 2f) + 13;
+        cv.drawRect(halfW, areaTop + 4, halfW + 1, H - 6, ln);
         p.setTypeface(bold);
         p.setColor(0xFFFFFFFF);
-        ctext(cv, p, "আজকের কাজ (" + Islamic.bn(todayN) + ")", cx, y, maxW, 12.5f, 9);
-        y = lines(cv, p, reg, today, todayN, tl, "আজ কোনো কাজ নেই", cx, y, maxW);
-        y += 22;
+        ctext(cv, p, "আজকের কাজ (" + Islamic.bn(todayN) + ")", lx, y0, colW, 12.5f, 8.5f);
+        lines(cv, p, reg, today, todayN, tl, "আজ কোনো কাজ নেই", lx, y0, colW);
         p.setTypeface(bold);
         p.setColor(0xFFFFFFFF);
-        ctext(cv, p, "আগামী ৭ দিনের কাজ (" + Islamic.bn(upN) + ")", cx, y, maxW, 12.5f, 9);
-        lines(cv, p, reg, up, upN, ul, "আগামী ৭ দিনে কোনো কাজ নেই", cx, y, maxW);
+        ctext(cv, p, "আগামী ৭ দিনের কাজ (" + Islamic.bn(upN) + ")", rx, y0, colW, 12.5f, 8.5f);
+        lines(cv, p, reg, up, upN, ul, "আগামী ৭ দিনে কোনো কাজ নেই", rx, y0, colW);
         return bmp;
     }
 

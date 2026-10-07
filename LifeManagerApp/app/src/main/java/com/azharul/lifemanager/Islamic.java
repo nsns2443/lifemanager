@@ -91,19 +91,25 @@ public class Islamic {
         return new double[]{dec, q / 15 - ra};
     }
 
+    /** আসরের ছায়া: ২ = হানাফি, ১ = শাফেয়ী (অ্যাপের সেটিং থেকে বসে) */
+    static volatile int asrFactor = 2;
+
+    /** সৌদি/গালফ এলাকা: উম্মুল কুরা পদ্ধতি (ফজর ১৮.৫°, ইশা = মাগরিবের ৯০ মিনিট পর) */
+    static boolean gulf(double lat, double lng) { return lat >= 12 && lat <= 33 && lng >= 34 && lng <= 60; }
+
     /** ফেরত: {ফজর, সূর্যোদয়, যোহর, আসর, সূর্যাস্ত/মাগরিব, ইশা} — দিনের ঘণ্টা (দশমিক) */
     static double[] prayer(Calendar c, double lat, double lng, double tz) {
         double jd = julian(c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1, c.get(Calendar.DAY_OF_MONTH)) - lng / (15 * 24.0);
         double adj = tz - lng / 15.0;
         double[] r = new double[6];
-        r[0] = angle(jd, lat, 18, 5 / 24.0, true) + adj;
+        r[0] = angle(jd, lat, gulf(lat, lng) ? 18.5 : 18, 5 / 24.0, true) + adj;
         r[1] = angle(jd, lat, 0.833, 6 / 24.0, true) + adj;
         r[2] = fix(12 - sun(jd + 0.5)[1], 24) + adj + 1 / 60.0; // যোহর: দুপুর + ১ মিনিট
         double dec = sun(jd + 13 / 24.0)[0];
-        double aa = -Math.toDegrees(Math.atan(1.0 / (2 + Math.tan(Math.toRadians(Math.abs(lat - dec))))));
+        double aa = -Math.toDegrees(Math.atan(1.0 / (asrFactor + Math.tan(Math.toRadians(Math.abs(lat - dec))))));
         r[3] = angle(jd, lat, aa, 13 / 24.0, false) + adj;
         r[4] = angle(jd, lat, 0.833, 18 / 24.0, false) + adj;
-        r[5] = angle(jd, lat, 18, 18 / 24.0, false) + adj;
+        r[5] = gulf(lat, lng) ? r[4] + 1.5 : angle(jd, lat, 18, 18 / 24.0, false) + adj;
         return r;
     }
 

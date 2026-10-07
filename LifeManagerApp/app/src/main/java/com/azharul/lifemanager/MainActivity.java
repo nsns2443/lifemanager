@@ -326,6 +326,18 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
+        public void setAsr(int f) {
+            TaskWidget.setAsr(MainActivity.this, f);
+            TaskWidget.refreshAll(MainActivity.this);
+        }
+
+        @JavascriptInterface
+        public int getAsr() {
+            TaskWidget.loadAsr(MainActivity.this);
+            return Islamic.asrFactor;
+        }
+
+        @JavascriptInterface
         public void setPlace(String json) {
             TaskWidget.setPlace(MainActivity.this, json);
             TaskWidget.refreshAll(MainActivity.this);
