@@ -6,7 +6,7 @@ import java.util.Calendar;
 public class Islamic {
 
     // হিজরি তারিখ চাঁদ দেখার উপর নির্ভর করে; বাংলাদেশের জন্য ১ দিন যোগ করা হয়েছে
-    static final int HIJRI_OFFSET = 1;
+    static final int HIJRI_OFFSET = 2;
 
     static final String[] WEEK = {"রবিবার", "সোমবার", "মঙ্গলবার", "বুধবার", "বৃহস্পতিবার", "শুক্রবার", "শনিবার"};
     static final String[] EN_MONTH = {"জানুয়ারি", "ফেব্রুয়ারি", "মার্চ", "এপ্রিল", "মে", "জুন", "জুলাই", "আগস্ট", "সেপ্টেম্বর", "অক্টোবর", "নভেম্বর", "ডিসেম্বর"};
@@ -62,8 +62,24 @@ public class Islamic {
         return Math.floor(365.25 * (y + 4716)) + Math.floor(30.6001 * (m + 1)) + d + b - 1524.5;
     }
 
+    /** আরবি তারিখ সমন্বয়: ০ = সৌদি (উম্মুল কুরা), -১ = বাংলাদেশ (১ দিন পিছনে), +১ */
+    static volatile int hijriAdj = 0;
+
     static String hijriDate(Calendar c) {
-        long jd = (long) (julian(c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1, c.get(Calendar.DAY_OF_MONTH)) + 0.5) + HIJRI_OFFSET;
+        try {
+            Calendar x = (Calendar) c.clone();
+            x.add(Calendar.DAY_OF_MONTH, hijriAdj);
+            android.icu.util.IslamicCalendar ic = new android.icu.util.IslamicCalendar(android.icu.util.IslamicCalendar.CalculationType.ISLAMIC_UMALQURA);
+            ic.setTimeInMillis(x.getTimeInMillis());
+            int mi = Math.max(0, Math.min(11, ic.get(android.icu.util.Calendar.MONTH)));
+            return bn(ic.get(android.icu.util.Calendar.DAY_OF_MONTH)) + " " + HJ_MONTH[mi] + " " + bn(ic.get(android.icu.util.Calendar.YEAR)) + " হিজরি";
+        } catch (Throwable ignored) {
+        }
+        return hijriTab(c, hijriAdj);
+    }
+
+    static String hijriTab(Calendar c, int adj) {
+        long jd = (long) (julian(c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1, c.get(Calendar.DAY_OF_MONTH)) + 0.5) + HIJRI_OFFSET + adj;
         long l = jd - 1948440 + 10632;
         long n = (l - 1) / 10631;
         l = l - 10631 * n + 354;

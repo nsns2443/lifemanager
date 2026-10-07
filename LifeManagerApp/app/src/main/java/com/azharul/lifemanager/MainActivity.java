@@ -326,6 +326,18 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
+        public void setHj(int v) {
+            TaskWidget.setHj(MainActivity.this, v);
+            TaskWidget.refreshAll(MainActivity.this);
+        }
+
+        @JavascriptInterface
+        public int getHj() {
+            TaskWidget.loadHj(MainActivity.this);
+            return Islamic.hijriAdj;
+        }
+
+        @JavascriptInterface
         public void setAsr(int f) {
             TaskWidget.setAsr(MainActivity.this, f);
             TaskWidget.refreshAll(MainActivity.this);

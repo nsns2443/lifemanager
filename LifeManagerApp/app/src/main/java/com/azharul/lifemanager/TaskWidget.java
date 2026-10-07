@@ -248,6 +248,16 @@ public class TaskWidget extends AppWidgetProvider {
         try { Islamic.asrFactor = c.getSharedPreferences("loc", Context.MODE_PRIVATE).getInt("asr", 2) == 1 ? 1 : 2; } catch (Throwable ignored) { }
     }
 
+    static void loadHj(Context c) {
+        try { Islamic.hijriAdj = c.getSharedPreferences("loc", Context.MODE_PRIVATE).getInt("hj", 0); } catch (Throwable ignored) { }
+    }
+
+    static void setHj(Context c, int v) {
+        v = Math.max(-2, Math.min(2, v));
+        c.getSharedPreferences("loc", Context.MODE_PRIVATE).edit().putInt("hj", v).apply();
+        Islamic.hijriAdj = v;
+    }
+
     static void setAsr(Context c, int f) {
         c.getSharedPreferences("loc", Context.MODE_PRIVATE).edit().putInt("asr", f == 1 ? 1 : 2).apply();
         Islamic.asrFactor = f == 1 ? 1 : 2;
@@ -545,6 +555,7 @@ public class TaskWidget extends AppWidgetProvider {
         double[] loc = location(c);
         double tz = zone.getOffset(now.getTimeInMillis()) / 3600000.0;
         loadAsr(c);
+        loadHj(c);
         double[] t = Islamic.prayer(now, loc[0], loc[1], tz);
         Calendar tmr = (Calendar) now.clone();
         tmr.add(Calendar.DAY_OF_MONTH, 1);
