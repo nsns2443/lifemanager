@@ -169,7 +169,7 @@ public class TaskWidget extends AppWidgetProvider {
                 Calendar day = (Calendar) now.clone();
                 day.add(Calendar.DAY_OF_MONTH, d);
                 double[] t = Islamic.prayer(day, loc[0], loc[1], tz);
-                int[] idx = {0, 2, 3, 4, 5};
+                int[] idx = {0, 1, 2, 3, 4, 5};
                 for (int k : idx) {
                     Calendar x = (Calendar) day.clone();
                     x.set(Calendar.HOUR_OF_DAY, 0); x.set(Calendar.MINUTE, 0); x.set(Calendar.SECOND, 0); x.set(Calendar.MILLISECOND, 0);
@@ -390,7 +390,7 @@ public class TaskWidget extends AppWidgetProvider {
                 JSONObject t = up.getJSONObject(i);
                 String ds = t.optString("DueDate", ""), tm = t.optString("DueTime", "");
                 String dm = "";
-                if (ds.length() >= 10) dm = Islamic.bn(Integer.parseInt(ds.substring(8, 10))) + "/" + Islamic.bn(Integer.parseInt(ds.substring(5, 7)));
+                if (ds.length() >= 10) dm = Integer.parseInt(ds.substring(8, 10)) + "-" + new String[]{"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"}[Math.max(0, Math.min(11, Integer.parseInt(ds.substring(5, 7)) - 1))] + "-" + ds.substring(2, 4);
                 upc.put(dm + (tm.isEmpty() ? "" : " " + Islamic.bn(tm)) + "  " + t.optString("Title", ""));
             }
             JSONObject out = new JSONObject();
@@ -590,8 +590,10 @@ public class TaskWidget extends AppWidgetProvider {
         double[] pt = {t[0], t[2], t[3], t[4], t[5]};
         double[] pe = {t[1], t[3], t[4], t[5], nextFajr};
         double nowH = now.get(Calendar.HOUR_OF_DAY) + now.get(Calendar.MINUTE) / 60.0;
-        int next = 0;
-        for (int i = 0; i < 5; i++) { if (pt[i] > nowH) { next = i; break; } if (i == 4) next = 0; }
+        // এখন যে ওয়াক্ত চলছে সেটাই সাদা: শুরু থেকে শেষ পর্যন্ত (সূর্যোদয় থেকে যোহর পর্যন্ত কোনোটাই সাদা নয়)
+        int next = -1;
+        for (int i = 0; i < 4; i++) { if (nowH >= pt[i] && nowH < pe[i]) { next = i; break; } }
+        if (next < 0 && (nowH >= pt[4] || nowH < pt[0])) next = 4;
         float top = 56, ph = 33, gap = 4;
         float pw = (W - pad * 2 - gap * 4) / 5f;
         for (int i = 0; i < 5; i++) {
