@@ -69,7 +69,8 @@ public class Islamic {
         try {
             Calendar x = (Calendar) c.clone();
             x.add(Calendar.DAY_OF_MONTH, hijriAdj);
-            android.icu.util.IslamicCalendar ic = new android.icu.util.IslamicCalendar(android.icu.util.IslamicCalendar.CalculationType.ISLAMIC_UMALQURA);
+            android.icu.util.IslamicCalendar ic = new android.icu.util.IslamicCalendar();
+            ic.setCalculationType(android.icu.util.IslamicCalendar.CalculationType.ISLAMIC_UMALQURA);
             ic.setTimeInMillis(x.getTimeInMillis());
             int mi = Math.max(0, Math.min(11, ic.get(android.icu.util.Calendar.MONTH)));
             return bn(ic.get(android.icu.util.Calendar.DAY_OF_MONTH)) + " " + HJ_MONTH[mi] + " " + bn(ic.get(android.icu.util.Calendar.YEAR)) + " হিজরি";
