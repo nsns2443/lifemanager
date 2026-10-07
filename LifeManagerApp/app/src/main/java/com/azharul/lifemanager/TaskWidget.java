@@ -16,6 +16,11 @@ import android.graphics.Paint;
 import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.graphics.Path;
+import android.widget.Toast;
+import android.content.SharedPreferences;
 import android.text.TextUtils;
 import android.widget.RemoteViews;
 
@@ -32,9 +37,21 @@ public class TaskWidget extends AppWidgetProvider {
     static long cachedLen = -1;
 
     @Override
-    public void onUpdate(Context c, AppWidgetManager m, int[] ids) {
+    public void onUpdate(final Context c, AppWidgetManager m, int[] ids) {
         ensureFont(c);
         for (int id : ids) update(c, m, id);
+        final PendingResult pr = goAsync();
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    if (fetchData(c) == 1) refreshAll(c);
+                } catch (Throwable ignored) {
+                } finally {
+                    pr.finish();
+                }
+            }
+        }).start();
     }
 
     @Override
@@ -48,10 +65,47 @@ public class TaskWidget extends AppWidgetProvider {
     static final String[] LABELS = {"হোম", "খরচ", "যোগ", "আয়", "আরও"};
     static final int[] IDS = {R.id.ic1, R.id.ic2, R.id.ic3, R.id.ic4, R.id.ic5};
 
+    static final String ACTION_NOW = "com.azharul.lifemanager.WIDGET_REFRESH_NOW";
+
     @Override
-    public void onReceive(Context c, Intent i) {
+    public void onReceive(final Context c, Intent i) {
         super.onReceive(c, i);
-        if (i != null && ACTION_REFRESH.equals(i.getAction())) refreshAll(c);
+        if (i == null) return;
+        if (ACTION_REFRESH.equals(i.getAction())) {
+            refreshAll(c);
+        } else if (ACTION_NOW.equals(i.getAction())) {
+            final PendingResult pr = goAsync();
+            final Handler h = new Handler(Looper.getMainLooper());
+            h.post(new Runnable() {
+                @Override
+                public void run() {
+                    Toast.makeText(c, "হালনাগাদ হচ্ছে…", Toast.LENGTH_SHORT).show();
+                }
+            });
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    String msg;
+                    try {
+                        refreshLocation(c);
+                        int r = fetchData(c);
+                        refreshAll(c);
+                        msg = r == 1 ? "হালনাগাদ হয়েছে" : r == 0 ? "অ্যাপ একবার খুলে লগইন করুন" : "ইন্টারনেট/লগইন সমস্যা — আগের তথ্য দেখানো হচ্ছে";
+                    } catch (Throwable t) {
+                        msg = "হালনাগাদ করা যায়নি";
+                    } finally {
+                        pr.finish();
+                    }
+                    final String m = msg;
+                    h.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            Toast.makeText(c, m, Toast.LENGTH_SHORT).show();
+                        }
+                    });
+                }
+            }).start();
+        }
     }
 
     static void update(Context c, AppWidgetManager m, int id) {
@@ -86,6 +140,14 @@ public class TaskWidget extends AppWidgetProvider {
             v.setOnClickPendingIntent(IDS[i], PendingIntent.getActivity(c, 10 + i, it,
                     PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE));
         }
+        try {
+            v.setImageViewBitmap(R.id.refresh, refreshIcon(c));
+        } catch (Throwable ignored) {
+        }
+        Intent now = new Intent(c, TaskWidget.class);
+        now.setAction(ACTION_NOW);
+        v.setOnClickPendingIntent(R.id.refresh, PendingIntent.getBroadcast(c, 88, now,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE));
         Intent open = new Intent(c, MainActivity.class);
         open.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         v.setOnClickPendingIntent(R.id.img, PendingIntent.getActivity(c, 1, open,
@@ -98,8 +160,9 @@ public class TaskWidget extends AppWidgetProvider {
     static void scheduleRefresh(Context c) {
         try {
             double[] loc = location(c);
-            Calendar now = Calendar.getInstance();
-            double tz = TimeZone.getDefault().getOffset(now.getTimeInMillis()) / 3600000.0;
+            TimeZone zone = tzOf(c);
+            Calendar now = Calendar.getInstance(zone);
+            double tz = zone.getOffset(now.getTimeInMillis()) / 3600000.0;
             long next = Long.MAX_VALUE;
             for (int d = 0; d < 2; d++) {
                 Calendar day = (Calendar) now.clone();
@@ -129,6 +192,7 @@ public class TaskWidget extends AppWidgetProvider {
     /** ফোনের সর্বশেষ জানা অবস্থান নিয়ে রাখে; জায়গা বদলালে শহরের নাম নতুন করে বের করে */
     static void refreshLocation(final Context c) {
         try {
+            if (manual(c)) return;
             if (android.os.Build.VERSION.SDK_INT >= 23
                     && c.checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION) != android.content.pm.PackageManager.PERMISSION_GRANTED) return;
             android.location.LocationManager lm = (android.location.LocationManager) c.getSystemService(Context.LOCATION_SERVICE);
@@ -175,14 +239,82 @@ public class TaskWidget extends AppWidgetProvider {
         }
     }
 
+    static boolean manual(Context c) {
+        return c.getSharedPreferences("loc", Context.MODE_PRIVATE).getBoolean("manual", false);
+    }
+
+    static TimeZone tzOf(Context c) {
+        try {
+            SharedPreferences p = c.getSharedPreferences("loc", Context.MODE_PRIVATE);
+            String z = p.getString("mtz", "");
+            if (p.getBoolean("manual", false) && z != null && !z.isEmpty()) return TimeZone.getTimeZone(z);
+        } catch (Throwable ignored) {
+        }
+        return TimeZone.getDefault();
+    }
+
+    /** অ্যাপ থেকে নিজে বাছাই করা জায়গা: json = {name, lat, lng, tz}; ফাঁকা হলে আবার অটো */
+    static void setPlace(Context c, String json) {
+        SharedPreferences.Editor e = c.getSharedPreferences("loc", Context.MODE_PRIVATE).edit();
+        try {
+            if (json == null || json.trim().isEmpty()) {
+                e.putBoolean("manual", false);
+            } else {
+                JSONObject o = new JSONObject(json);
+                e.putBoolean("manual", true);
+                e.putLong("mlat", Double.doubleToLongBits(o.getDouble("lat")));
+                e.putLong("mlng", Double.doubleToLongBits(o.getDouble("lng")));
+                e.putString("mname", o.optString("name", ""));
+                e.putString("mtz", o.optString("tz", ""));
+            }
+        } catch (Throwable t) {
+            e.putBoolean("manual", false);
+        }
+        e.apply();
+    }
+
+    static final String[][] BN_CITY = {
+        {"dhaka", "ঢাকা"}, {"gazipur", "গাজীপুর"}, {"narayanganj", "নারায়ণগঞ্জ"}, {"narsingdi", "নরসিংদী"}, {"manikganj", "মানিকগঞ্জ"},
+        {"munshiganj", "মুন্সিগঞ্জ"}, {"tangail", "টাঙ্গাইল"}, {"kishoreganj", "কিশোরগঞ্জ"}, {"faridpur", "ফরিদপুর"}, {"madaripur", "মাদারীপুর"},
+        {"shariatpur", "শরীয়তপুর"}, {"gopalganj", "গোপালগঞ্জ"}, {"rajbari", "রাজবাড়ী"}, {"chattogram", "চট্টগ্রাম"}, {"chittagong", "চট্টগ্রাম"},
+        {"cox's bazar", "কক্সবাজার"}, {"coxs bazar", "কক্সবাজার"}, {"cumilla", "কুমিল্লা"}, {"comilla", "কুমিল্লা"}, {"feni", "ফেনী"},
+        {"brahmanbaria", "ব্রাহ্মণবাড়িয়া"}, {"rangamati", "রাঙ্গামাটি"}, {"noakhali", "নোয়াখালী"}, {"chandpur", "চাঁদপুর"}, {"lakshmipur", "লক্ষ্মীপুর"},
+        {"khagrachhari", "খাগড়াছড়ি"}, {"khagrachari", "খাগড়াছড়ি"}, {"bandarban", "বান্দরবান"}, {"rajshahi", "রাজশাহী"}, {"bogura", "বগুড়া"},
+        {"bogra", "বগুড়া"}, {"pabna", "পাবনা"}, {"sirajganj", "সিরাজগঞ্জ"}, {"natore", "নাটোর"}, {"naogaon", "নওগাঁ"},
+        {"chapainawabganj", "চাঁপাইনবাবগঞ্জ"}, {"nawabganj", "চাঁপাইনবাবগঞ্জ"}, {"joypurhat", "জয়পুরহাট"}, {"khulna", "খুলনা"}, {"jashore", "যশোর"},
+        {"jessore", "যশোর"}, {"satkhira", "সাতক্ষীরা"}, {"bagerhat", "বাগেরহাট"}, {"kushtia", "কুষ্টিয়া"}, {"jhenaidah", "ঝিনাইদহ"},
+        {"chuadanga", "চুয়াডাঙ্গা"}, {"meherpur", "মেহেরপুর"}, {"magura", "মাগুরা"}, {"narail", "নড়াইল"}, {"barishal", "বরিশাল"},
+        {"barisal", "বরিশাল"}, {"bhola", "ভোলা"}, {"patuakhali", "পটুয়াখালী"}, {"pirojpur", "পিরোজপুর"}, {"barguna", "বরগুনা"},
+        {"jhalokati", "ঝালকাঠি"}, {"sylhet", "সিলেট"}, {"moulvibazar", "মৌলভীবাজার"}, {"habiganj", "হবিগঞ্জ"}, {"sunamganj", "সুনামগঞ্জ"},
+        {"rangpur", "রংপুর"}, {"dinajpur", "দিনাজপুর"}, {"kurigram", "কুড়িগ্রাম"}, {"gaibandha", "গাইবান্ধা"}, {"nilphamari", "নীলফামারী"},
+        {"lalmonirhat", "লালমনিরহাট"}, {"thakurgaon", "ঠাকুরগাঁও"}, {"panchagarh", "পঞ্চগড়"}, {"mymensingh", "ময়মনসিংহ"}, {"jamalpur", "জামালপুর"},
+        {"netrokona", "নেত্রকোণা"}, {"sherpur", "শেরপুর"}
+    };
+
+    /** ইংরেজিতে এলে বাংলাদেশের জেলার নাম বাংলায় বদলে দেয় */
+    static String bnName(String n) {
+        if (n == null) return "";
+        String k = n.toLowerCase().replace(" district", "").replace(" division", "").replace(" city", "").replace(" sadar", "").trim();
+        for (String[] r : BN_CITY) if (r[0].equals(k)) return r[1];
+        return n;
+    }
+
     static String city(Context c, double[] loc) {
-        String n = c.getSharedPreferences("loc", Context.MODE_PRIVATE).getString("city", "");
-        return (n == null || n.isEmpty()) ? Islamic.cityName(loc[0], loc[1]) : n;
+        SharedPreferences p = c.getSharedPreferences("loc", Context.MODE_PRIVATE);
+        if (p.getBoolean("manual", false)) {
+            String m = p.getString("mname", "");
+            if (m != null && !m.isEmpty()) return m;
+        }
+        String n = p.getString("city", "");
+        return (n == null || n.isEmpty()) ? Islamic.cityName(loc[0], loc[1]) : bnName(n);
     }
 
     /** সংরক্ষিত অবস্থান (না থাকলে খুলনা) */
     static double[] location(Context c) {
-        android.content.SharedPreferences p = c.getSharedPreferences("loc", Context.MODE_PRIVATE);
+        SharedPreferences p = c.getSharedPreferences("loc", Context.MODE_PRIVATE);
+        if (p.getBoolean("manual", false) && p.contains("mlat")) {
+            return new double[]{Double.longBitsToDouble(p.getLong("mlat", 0)), Double.longBitsToDouble(p.getLong("mlng", 0))};
+        }
         if (p.contains("lat")) return new double[]{Double.longBitsToDouble(p.getLong("lat", 0)), Double.longBitsToDouble(p.getLong("lng", 0))};
         return new double[]{22.8456, 89.5403};
     }
@@ -190,6 +322,94 @@ public class TaskWidget extends AppWidgetProvider {
     static void saveLocation(Context c, double lat, double lng) {
         c.getSharedPreferences("loc", Context.MODE_PRIVATE).edit()
                 .putLong("lat", Double.doubleToLongBits(lat)).putLong("lng", Double.doubleToLongBits(lng)).apply();
+    }
+
+    /** অ্যাপ থেকে সেশন জমা (উইজেট নিজে সার্ভার থেকে কাজ আনার জন্য) */
+    static void setSession(Context c, String url, String token) {
+        c.getSharedPreferences("session", Context.MODE_PRIVATE).edit().putString("url", url == null ? "" : url).putString("token", token == null ? "" : token).apply();
+    }
+
+    /** ফেরত: 1 = সফল, 0 = সেশন নেই, -1 = ব্যর্থ */
+    static int fetchData(Context c) {
+        try {
+            SharedPreferences s = c.getSharedPreferences("session", Context.MODE_PRIVATE);
+            String url = s.getString("url", ""), tok = s.getString("token", "");
+            if (url == null || url.isEmpty() || tok == null || tok.isEmpty()) return 0;
+            java.net.HttpURLConnection h = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+            h.setRequestMethod("POST");
+            h.setDoOutput(true);
+            h.setConnectTimeout(8000);
+            h.setReadTimeout(20000);
+            h.setInstanceFollowRedirects(true);
+            h.setRequestProperty("Content-Type", "text/plain;charset=UTF-8");
+            JSONObject body = new JSONObject();
+            body.put("a", "dashboard");
+            body.put("p", new JSONObject());
+            body.put("t", tok);
+            java.io.OutputStream os = h.getOutputStream();
+            os.write(body.toString().getBytes("UTF-8"));
+            os.close();
+            if (h.getResponseCode() != 200) return -1;
+            java.io.BufferedReader br = new java.io.BufferedReader(new java.io.InputStreamReader(h.getInputStream(), "UTF-8"));
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = br.readLine()) != null) sb.append(line);
+            br.close();
+            JSONObject o = new JSONObject(sb.toString());
+            if (!o.optBoolean("ok", false)) return -1;
+            JSONObject d = o.getJSONObject("data");
+            JSONArray td = d.optJSONArray("todayTasks"), up = d.optJSONArray("upcomingTasks");
+            JSONArray today = new JSONArray(), upc = new JSONArray();
+            int tn = td == null ? 0 : td.length(), un = up == null ? 0 : up.length();
+            for (int i = 0; i < Math.min(8, tn); i++) {
+                JSONObject t = td.getJSONObject(i);
+                String tm = t.optString("DueTime", "");
+                today.put((tm.isEmpty() ? "" : Islamic.bn(tm) + "  ") + t.optString("Title", ""));
+            }
+            for (int i = 0; i < Math.min(10, un); i++) {
+                JSONObject t = up.getJSONObject(i);
+                String ds = t.optString("DueDate", ""), tm = t.optString("DueTime", "");
+                String dm = "";
+                if (ds.length() >= 10) dm = Islamic.bn(Integer.parseInt(ds.substring(8, 10))) + "/" + Islamic.bn(Integer.parseInt(ds.substring(5, 7)));
+                upc.put(dm + (tm.isEmpty() ? "" : " " + Islamic.bn(tm)) + "  " + t.optString("Title", ""));
+            }
+            JSONObject out = new JSONObject();
+            out.put("title", "আজকের কাজ (" + Islamic.bn(tn) + ")");
+            out.put("today", today);
+            out.put("todayCount", tn);
+            out.put("upcoming", upc);
+            out.put("upCount", un);
+            save(c, out.toString());
+            return 1;
+        } catch (Throwable t) {
+            return -1;
+        }
+    }
+
+    /** রিফ্রেশ আইকন (গোল তীর) */
+    static Bitmap refreshIcon(Context c) {
+        float d = c.getResources().getDisplayMetrics().density;
+        int px = Math.round(26 * d);
+        Bitmap bmp = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888);
+        Canvas cv = new Canvas(bmp);
+        cv.scale(d, d);
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        p.setColor(0x33FFFFFF);
+        cv.drawCircle(13, 13, 12.5f, p);
+        p.setStyle(Paint.Style.STROKE);
+        p.setStrokeWidth(2f);
+        p.setColor(0xFFFFFFFF);
+        p.setStrokeCap(Paint.Cap.ROUND);
+        RectF r = new RectF(7.5f, 7.5f, 18.5f, 18.5f);
+        cv.drawArc(r, -60, 280, false, p);
+        p.setStyle(Paint.Style.FILL);
+        Path ph = new Path();
+        ph.moveTo(18.5f, 5.2f);
+        ph.lineTo(18.9f, 10.6f);
+        ph.lineTo(13.9f, 8.6f);
+        ph.close();
+        cv.drawPath(ph, p);
+        return bmp;
     }
 
     /** নিচের ৫টি আইকন-বোতাম */
@@ -264,6 +484,21 @@ public class TaskWidget extends AppWidgetProvider {
         return r;
     }
 
+    /** লেখা জায়গায় না ধরলে ফন্ট ছোট করে বসায় */
+    static float fit(Paint p, String s, float maxW, float size, float min) {
+        p.setTextSize(size);
+        while (p.measureText(s) > maxW && size > min) {
+            size -= 0.5f;
+            p.setTextSize(size);
+        }
+        return size;
+    }
+
+    static void ctext(Canvas cv, Paint p, String s, float cx, float y, float maxW, float size, float min) {
+        fit(p, s, maxW, size, min);
+        cv.drawText(ell(s, p, maxW), cx, y, p);
+    }
+
     static Bitmap draw(Context c, int wDp, int hDp) {
         float d = c.getResources().getDisplayMetrics().density;
         float scale = d;
@@ -295,48 +530,43 @@ public class TaskWidget extends AppWidgetProvider {
         Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
         float pad = 8;
 
-        // তারিখ ও সময়
-        Calendar now = Calendar.getInstance();
+        TimeZone zone = tzOf(c);
+        Calendar now = Calendar.getInstance(zone);
         double[] loc = location(c);
-        double tz = TimeZone.getDefault().getOffset(now.getTimeInMillis()) / 3600000.0;
+        double tz = zone.getOffset(now.getTimeInMillis()) / 3600000.0;
         double[] t = Islamic.prayer(now, loc[0], loc[1], tz);
-        float splitX = W * 0.62f;
 
-        float y = 4;
-        p.setTextAlign(Paint.Align.LEFT);
+        // ---- হেডার: ঠিক মাঝখানে দাগ, দুই পাশেই লেখা মাঝ বরাবর ----
+        float mid = W / 2f;
+        float lcx = mid / 2f, lw = mid - 12;
+        float rLeft = mid + 6, rRight = W - 34;
+        float rcx = (rLeft + rRight) / 2f, rw = rRight - rLeft;
+        p.setTextAlign(Paint.Align.CENTER);
         p.setTypeface(bold);
         p.setColor(0xFFFFFFFF);
-        p.setTextSize(13);
-        y += 12;
-        cv.drawText(ell(Islamic.banglaDate(now), p, splitX - pad - 4), pad, y, p);
+        ctext(cv, p, Islamic.hijriDate(now), lcx, 17, lw, 12.5f, 8.5f);
         p.setTypeface(reg);
-        p.setTextSize(11.5f);
         p.setColor(0xFFFBD3E5);
-        y += 14;
-        cv.drawText(ell(Islamic.englishDate(now), p, splitX - pad - 4), pad, y, p);
-        y += 14;
-        cv.drawText(ell(Islamic.hijriDate(now), p, splitX - pad - 4), pad, y, p);
+        ctext(cv, p, Islamic.englishDate(now), lcx, 32, lw, 11.5f, 8.5f);
+        ctext(cv, p, Islamic.banglaDate(now), lcx, 47, lw, 11.5f, 8.5f);
 
-        // ডানে: সূর্যোদয়/সূর্যাস্ত/অবস্থান
         Paint ln = new Paint(Paint.ANTI_ALIAS_FLAG);
-        ln.setColor(0x44FFFFFF);
-        cv.drawRect(splitX, 7, splitX + 1, 46, ln);
-        float rx = splitX + 8;
-        p.setColor(0xFFFFFFFF);
-        p.setTextSize(11.5f);
-        cv.drawText(ell("সূর্যোদয় " + Islamic.fmt(t[1]), p, W - rx - 4), rx, 17, p);
-        cv.drawText(ell("সূর্যাস্ত " + Islamic.fmt(t[4]), p, W - rx - 4), rx, 31, p);
-        p.setColor(0xFFFBD3E5);
-        p.setTextSize(10.5f);
-        cv.drawText(ell(city(c, loc), p, W - rx - 4), rx, 44, p);
+        ln.setColor(0x55FFFFFF);
+        cv.drawRect(mid, 6, mid + 1, 50, ln);
 
-        // পাঁচ ওয়াক্ত
+        p.setColor(0xFFFFFFFF);
+        ctext(cv, p, "সূর্যোদয় " + Islamic.fmt(t[1]), rcx, 17, rw, 11.5f, 8.5f);
+        ctext(cv, p, "সূর্যাস্ত " + Islamic.fmt(t[4]), rcx, 32, rw, 11.5f, 8.5f);
+        p.setColor(0xFFFBD3E5);
+        ctext(cv, p, city(c, loc), rcx, 47, rw, 11.5f, 8.5f);
+
+        // ---- পাঁচ ওয়াক্ত ----
         String[] names = {"ফজর", "যোহর", "আসর", "মাগরিব", "ইশা"};
         double[] pt = {t[0], t[2], t[3], t[4], t[5]};
         double nowH = now.get(Calendar.HOUR_OF_DAY) + now.get(Calendar.MINUTE) / 60.0;
         int next = 0;
         for (int i = 0; i < 5; i++) { if (pt[i] > nowH) { next = i; break; } if (i == 4) next = 0; }
-        float top = 53, ph = 33, gap = 4;
+        float top = 56, ph = 33, gap = 4;
         float pw = (W - pad * 2 - gap * 4) / 5f;
         for (int i = 0; i < 5; i++) {
             float x0 = pad + i * (pw + gap);
@@ -344,51 +574,47 @@ public class TaskWidget extends AppWidgetProvider {
             Paint bg = new Paint(Paint.ANTI_ALIAS_FLAG);
             bg.setColor(on ? 0xFFFFFFFF : 0x2EFFFFFF);
             cv.drawRoundRect(new RectF(x0, top, x0 + pw, top + ph), 9, 9, bg);
-            p.setTextAlign(Paint.Align.CENTER);
             p.setTypeface(reg);
-            p.setTextSize(10);
             p.setColor(on ? 0xFFB0145C : 0xFFFBD3E5);
-            cv.drawText(names[i], x0 + pw / 2, top + 13, p);
+            ctext(cv, p, names[i], x0 + pw / 2, top + 13, pw - 4, 10, 8);
             p.setTypeface(bold);
-            p.setTextSize(11.5f);
             p.setColor(on ? 0xFF1A1A1F : 0xFFFFFFFF);
-            cv.drawText(Islamic.fmt(pt[i]), x0 + pw / 2, top + 27, p);
+            ctext(cv, p, Islamic.fmt(pt[i]), x0 + pw / 2, top + 27, pw - 4, 11.5f, 8.5f);
         }
 
-        // বিভাজক
-        y = top + ph + 6;
+        // ---- বিভাজক ----
+        float y = top + ph + 7;
         cv.drawRect(pad + 6, y, W - pad - 6, y + 1, ln);
-        y += 1;
+        float areaTop = y + 1, areaH = H - areaTop - 3;
 
-        // কাজ: আজকের ও আগামী ৭ দিন
+        // ---- কাজ: দাগের নিচের ফাঁকা জায়গার ঠিক মাঝখানে ----
         float cx = W / 2f, maxW = W - pad * 2;
-        float avail = H - y - 4;
-        int cap = (int) Math.max(2, Math.floor((avail - 36) / 14f));
+        p.setTextAlign(Paint.Align.CENTER);
+        if (!empty.isEmpty()) {
+            p.setTypeface(reg);
+            p.setColor(0xFFFBD3E5);
+            ctext(cv, p, empty, cx, areaTop + areaH / 2f + 4, maxW, 12.5f, 9);
+            return bmp;
+        }
+        int cap = (int) Math.max(2, Math.floor((areaH - 44) / 14f));
         int uCap = Math.max(1, cap / 2), tCap = Math.max(1, cap - uCap);
         if (up.length == 0) { uCap = 1; tCap = Math.max(1, cap - 1); }
         else if (today.length == 0) { tCap = 1; uCap = Math.max(1, cap - 1); }
         else if (today.length < tCap) { uCap = Math.min(up.length, cap - today.length); }
+        int tl = Math.max(1, Math.min(today.length, tCap)), ul = Math.max(1, Math.min(up.length, uCap));
+        float block = 16 + tl * 14f + 8 + 16 + ul * 14f;
+        y = areaTop + Math.max(0, (areaH - block) / 2f);
 
-        p.setTextAlign(Paint.Align.CENTER);
-        if (!empty.isEmpty()) {
-            p.setTypeface(reg);
-            p.setTextSize(12);
-            p.setColor(0xFFFBD3E5);
-            cv.drawText(empty, cx, y + 26, p);
-        } else {
-            y += 14;
-            p.setTypeface(bold);
-            p.setTextSize(12.5f);
-            p.setColor(0xFFFFFFFF);
-            cv.drawText("আজকের কাজ (" + Islamic.bn(todayN) + ")", cx, y, p);
-            y = lines(cv, p, reg, today, todayN, tCap, "আজ কোনো কাজ নেই", cx, y, maxW);
-            y += 15;
-            p.setTypeface(bold);
-            p.setTextSize(12.5f);
-            p.setColor(0xFFFFFFFF);
-            cv.drawText("আগামী ৭ দিনের কাজ (" + Islamic.bn(upN) + ")", cx, y, p);
-            y = lines(cv, p, reg, up, upN, uCap, "আগামী ৭ দিনে কোনো কাজ নেই", cx, y, maxW);
-        }
+        y += 13;
+        p.setTypeface(bold);
+        p.setColor(0xFFFFFFFF);
+        ctext(cv, p, "আজকের কাজ (" + Islamic.bn(todayN) + ")", cx, y, maxW, 12.5f, 9);
+        y = lines(cv, p, reg, today, todayN, tl, "আজ কোনো কাজ নেই", cx, y, maxW);
+        y += 22;
+        p.setTypeface(bold);
+        p.setColor(0xFFFFFFFF);
+        ctext(cv, p, "আগামী ৭ দিনের কাজ (" + Islamic.bn(upN) + ")", cx, y, maxW, 12.5f, 9);
+        lines(cv, p, reg, up, upN, ul, "আগামী ৭ দিনে কোনো কাজ নেই", cx, y, maxW);
         return bmp;
     }
 

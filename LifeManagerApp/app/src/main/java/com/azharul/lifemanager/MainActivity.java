@@ -321,6 +321,17 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
+        public void setSession(String url, String token) {
+            TaskWidget.setSession(MainActivity.this, url, token);
+        }
+
+        @JavascriptInterface
+        public void setPlace(String json) {
+            TaskWidget.setPlace(MainActivity.this, json);
+            TaskWidget.refreshAll(MainActivity.this);
+        }
+
+        @JavascriptInterface
         public String takeAction() {
             String g = pendingGo;
             pendingGo = "";
