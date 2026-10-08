@@ -28,7 +28,7 @@ import android.widget.Toast;
 public class MainActivity extends Activity {
 
     /** আপনার Apps Script অ্যাপের /exec ঠিকানা এখানে বসাতে পারেন। ফাঁকা বা না বসালে প্রথমবার অ্যাপ নিজেই জিজ্ঞেস করবে। */
-    static final String DEFAULT_URL = "";
+    static final String DEFAULT_URL = "https://familyaccountss.blogspot.com/";
 
     private static final int REQ_FILE = 11;
     private static final int REQ_NOTIF = 12;
@@ -156,8 +156,8 @@ public class MainActivity extends Activity {
     }
 
     private String getSavedUrl() {
-        String u = cfg().getString("url", "");
-        if (u == null || u.isEmpty()) u = DEFAULT_URL;
+        String u = DEFAULT_URL; // ঠিকানা অ্যাপের ভেতরেই বসানো — আর পেস্ট করতে হবে না
+        if (u == null || u.isEmpty()) u = cfg().getString("url", "");
         return u == null ? "" : u.trim();
     }
 
