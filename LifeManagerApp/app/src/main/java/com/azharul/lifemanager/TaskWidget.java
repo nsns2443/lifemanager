@@ -399,6 +399,8 @@ public class TaskWidget extends AppWidgetProvider {
             out.put("todayCount", tn);
             out.put("upcoming", upc);
             out.put("upCount", un);
+            JSONObject fd = d.optJSONObject("fund");
+            if (fd != null) out.put("fund", fd);
             save(c, out.toString());
             return 1;
         } catch (Throwable t) {
@@ -531,6 +533,8 @@ public class TaskWidget extends AppWidgetProvider {
         String[] today = new String[0], up = new String[0];
         int todayN = 0, upN = 0;
         String empty = "";
+        boolean hasFund = false;
+        double fRec = 0, fSpent = 0, fLeft = 0;
         String json = c.getSharedPreferences("widget", Context.MODE_PRIVATE).getString("json", "");
         if (json.isEmpty()) {
             empty = "কাজ দেখতে অ্যাপ একবার খুলুন";
@@ -541,6 +545,8 @@ public class TaskWidget extends AppWidgetProvider {
                 up = arr(o, "upcoming", 10);
                 todayN = o.optInt("todayCount", today.length);
                 upN = o.optInt("upCount", up.length);
+                JSONObject fo = o.optJSONObject("fund");
+                if (fo != null) { hasFund = true; fRec = fo.optDouble("received", 0); fSpent = fo.optDouble("spent", 0); fLeft = fo.optDouble("left", 0); }
             } catch (Exception e) {
                 empty = "তথ্য পড়া যায়নি, অ্যাপ খুলুন";
             }
@@ -616,7 +622,7 @@ public class TaskWidget extends AppWidgetProvider {
         // ---- বিভাজক ----
         float y = top + ph + 7;
         cv.drawRect(pad + 6, y, W - pad - 6, y + 1, ln);
-        float areaTop = y + 1, areaH = H - areaTop - 3;
+        float areaTop = y + 1, areaH = H - areaTop - 3 - (hasFund ? 15 : 0);
 
         // ---- কাজ: বামে আজকের, মাঝে দাগ, ডানে আগামী ৭ দিনের ----
         float halfW = W / 2f;
@@ -633,7 +639,15 @@ public class TaskWidget extends AppWidgetProvider {
         int rows = Math.max(tl, ul);
         float block = 16 + rows * 14f;
         float y0 = areaTop + Math.max(0, (areaH - block) / 2f) + 13;
-        cv.drawRect(halfW, areaTop + 4, halfW + 1, H - 6, ln);
+        cv.drawRect(halfW, areaTop + 4, halfW + 1, areaTop + areaH - 2, ln);
+        if (hasFund) {
+            cv.drawRect(pad + 6, areaTop + areaH + 1, W - pad - 6, areaTop + areaH + 2, ln);
+            p.setTypeface(reg);
+            p.setColor(0xFFFBD3E5);
+            String fs = "তহবিল: পেয়েছি " + money(fRec) + "  •  খরচ " + money(fSpent) + "  •  বাকি " + money(fLeft);
+            ctext(cv, p, fs, W / 2f, H - 5, W - pad * 2, 10.5f, 7.5f);
+            p.setTypeface(bold);
+        }
         p.setTypeface(bold);
         p.setColor(0xFFFFFFFF);
         ctext(cv, p, "আজকের কাজ (" + Islamic.bn(todayN) + ")", lx, y0, colW, 12.5f, 8.5f);
@@ -643,6 +657,12 @@ public class TaskWidget extends AppWidgetProvider {
         ctext(cv, p, "আগামী ৭ দিনের কাজ (" + Islamic.bn(upN) + ")", rx, y0, colW, 12.5f, 8.5f);
         lines(cv, p, reg, up, upN, ul, "আগামী ৭ দিনে কোনো কাজ নেই", rx, y0, colW);
         return bmp;
+    }
+
+    /** টাকার অংক: ৳১২,৫০০ (বাংলা সংখ্যা) */
+    static String money(double v) {
+        long r = Math.round(Math.abs(v));
+        return (v < 0 ? "-" : "") + "৳" + Islamic.bn(String.format(java.util.Locale.US, "%,d", r));
     }
 
     static float lines(Canvas cv, Paint p, Typeface reg, String[] a, int total, int cap,
