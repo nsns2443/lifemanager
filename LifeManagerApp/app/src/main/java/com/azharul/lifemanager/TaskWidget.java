@@ -45,7 +45,8 @@ public class TaskWidget extends AppWidgetProvider {
             @Override
             public void run() {
                 try {
-                    if (fetchData(c) == 1) refreshAll(c);
+                    boolean w = fetchWeather(c);
+                    if (fetchData(c) == 1 || w) refreshAll(c);
                 } catch (Throwable ignored) {
                 } finally {
                     pr.finish();
@@ -60,9 +61,9 @@ public class TaskWidget extends AppWidgetProvider {
     }
 
     static final String ACTION_REFRESH = "com.azharul.lifemanager.WIDGET_REFRESH";
-    static final String[] KEYS = {"dashboard", "expenses", "add", "income", "more"};
-    static final String[] ICONS = {"🏠", "💸", "＋", "💰", "☰"};
-    static final String[] LABELS = {"হোম", "খরচ", "যোগ", "আয়", "আরও"};
+    static final String[] KEYS = {"funds", "expenses", "add", "income", "more"};
+    static final String[] ICONS = {"🏦", "💸", "＋", "💰", "☰"};
+    static final String[] LABELS = {"ব্যয় বরাদ্দ", "খরচ", "যোগ", "আয়", "আরও"};
     static final int[] IDS = {R.id.ic1, R.id.ic2, R.id.ic3, R.id.ic4, R.id.ic5};
 
     static final String ACTION_NOW = "com.azharul.lifemanager.WIDGET_REFRESH_NOW";
@@ -88,6 +89,7 @@ public class TaskWidget extends AppWidgetProvider {
                     String msg;
                     try {
                         refreshLocation(c);
+                        fetchWeather(c);
                         int r = fetchData(c);
                         refreshAll(c);
                         msg = r == 1 ? "হালনাগাদ হয়েছে" : r == 0 ? "অ্যাপ একবার খুলে লগইন করুন" : "ইন্টারনেট/লগইন সমস্যা — আগের তথ্য দেখানো হচ্ছে";
@@ -459,8 +461,8 @@ public class TaskWidget extends AppWidgetProvider {
             cv.drawText(ICONS[i], cx, 22, p);
         }
         p.setTypeface(font(c, false));
-        p.setTextSize(9.5f);
         p.setColor(fab ? 0xFFB0145C : 0xFFFFFFFF);
+        fit(p, LABELS[i], tw - 4, 9.5f, 6.5f);
         cv.drawText(LABELS[i], cx, hDp - 7, p);
         return bmp;
     }
@@ -533,8 +535,7 @@ public class TaskWidget extends AppWidgetProvider {
         String[] today = new String[0], up = new String[0];
         int todayN = 0, upN = 0;
         String empty = "";
-        boolean hasFund = false;
-        double fRec = 0, fSpent = 0, fLeft = 0;
+        JSONArray fundArr = null;
         String json = c.getSharedPreferences("widget", Context.MODE_PRIVATE).getString("json", "");
         if (json.isEmpty()) {
             empty = "কাজ দেখতে অ্যাপ একবার খুলুন";
@@ -546,7 +547,7 @@ public class TaskWidget extends AppWidgetProvider {
                 todayN = o.optInt("todayCount", today.length);
                 upN = o.optInt("upCount", up.length);
                 JSONObject fo = o.optJSONObject("fund");
-                if (fo != null) { hasFund = true; fRec = fo.optDouble("received", 0); fSpent = fo.optDouble("spent", 0); fLeft = fo.optDouble("left", 0); }
+                if (fo != null) fundArr = fo.optJSONArray("persons");
             } catch (Exception e) {
                 empty = "তথ্য পড়া যায়নি, অ্যাপ খুলুন";
             }
@@ -589,7 +590,8 @@ public class TaskWidget extends AppWidgetProvider {
         ctext(cv, p, "সূর্যোদয় " + Islamic.fmt(t[1]), rcx, 17, rw, 11.5f, 8.5f);
         ctext(cv, p, "সূর্যাস্ত " + Islamic.fmt(t[4]), rcx, 32, rw, 11.5f, 8.5f);
         p.setColor(0xFFFBD3E5);
-        ctext(cv, p, city(c, loc), rcx, 47, rw, 11.5f, 8.5f);
+        String wx = weatherText(c, loc);
+        ctext(cv, p, city(c, loc) + (wx.isEmpty() ? "" : " • " + wx), rcx, 47, rw, 11.5f, 7.5f);
 
         // ---- পাঁচ ওয়াক্ত ----
         String[] names = {"ফজর", "যোহর", "আসর", "মাগরিব", "ইশা"};
@@ -622,7 +624,10 @@ public class TaskWidget extends AppWidgetProvider {
         // ---- বিভাজক ----
         float y = top + ph + 7;
         cv.drawRect(pad + 6, y, W - pad - 6, y + 1, ln);
-        float areaTop = y + 1, areaH = H - areaTop - 3 - (hasFund ? 15 : 0);
+        int fN = fundArr == null ? 0 : Math.min(4, fundArr.length());
+        int fRows = (fN + 1) / 2;
+        float fundH = fN == 0 ? 0 : 6 + fRows * 12.5f;
+        float areaTop = y + 1, areaH = H - areaTop - 3 - fundH;
 
         // ---- কাজ: বামে আজকের, মাঝে দাগ, ডানে আগামী ৭ দিনের ----
         float halfW = W / 2f;
@@ -640,12 +645,21 @@ public class TaskWidget extends AppWidgetProvider {
         float block = 16 + rows * 14f;
         float y0 = areaTop + Math.max(0, (areaH - block) / 2f) + 13;
         cv.drawRect(halfW, areaTop + 4, halfW + 1, areaTop + areaH - 2, ln);
-        if (hasFund) {
+        if (fN > 0) {
             cv.drawRect(pad + 6, areaTop + areaH + 1, W - pad - 6, areaTop + areaH + 2, ln);
             p.setTypeface(reg);
-            p.setColor(0xFFFBD3E5);
-            String fs = "তহবিল: পেয়েছি " + money(fRec) + "  •  খরচ " + money(fSpent) + "  •  বাকি " + money(fLeft);
-            ctext(cv, p, fs, W / 2f, H - 5, W - pad * 2, 10.5f, 7.5f);
+            for (int k = 0; k < fN; k++) {
+                try {
+                    JSONObject g = fundArr.getJSONObject(k);
+                    double rc = g.optDouble("received", 0), sp = g.optDouble("spent", 0), lf = g.optDouble("left", 0);
+                    String s = g.optString("person", "") + " " + money(rc).replace("৳", "") + "−" + money(sp).replace("৳", "") + "=" + money(lf);
+                    p.setColor(lf < 0 ? 0xFFFFB4B4 : 0xFFFBD3E5);
+                    float cx2 = fN == 1 ? W / 2f : (k % 2 == 0 ? lx : rx);
+                    float yy = areaTop + areaH + 12 + (k / 2) * 12.5f;
+                    ctext(cv, p, s, cx2, yy, fN == 1 ? W - pad * 2 : colW, 10f, 6.5f);
+                } catch (Throwable ignored) {
+                }
+            }
             p.setTypeface(bold);
         }
         p.setTypeface(bold);
@@ -657,6 +671,62 @@ public class TaskWidget extends AppWidgetProvider {
         ctext(cv, p, "আগামী ৭ দিনের কাজ (" + Islamic.bn(upN) + ")", rx, y0, colW, 12.5f, 8.5f);
         lines(cv, p, reg, up, upN, ul, "আগামী ৭ দিনে কোনো কাজ নেই", rx, y0, colW);
         return bmp;
+    }
+
+    // ---------- আবহাওয়া (Open-Meteo, চাবি লাগে না) ----------
+    static String wxDesc(int code) {
+        if (code == 0) return "পরিষ্কার";
+        if (code == 1 || code == 2) return "আংশিক মেঘলা";
+        if (code == 3) return "মেঘলা";
+        if (code == 45 || code == 48) return "কুয়াশা";
+        if (code >= 51 && code <= 57) return "গুঁড়ি বৃষ্টি";
+        if (code >= 61 && code <= 67) return "বৃষ্টি";
+        if (code >= 71 && code <= 77) return "তুষার";
+        if (code >= 80 && code <= 82) return "বৃষ্টির ঝাপটা";
+        if (code >= 95) return "বজ্রসহ বৃষ্টি";
+        return "";
+    }
+
+    /** ফোনে সেভ করা আবহাওয়া থেকে লেখা বানায় (জায়গা না মিললে বা ৬ ঘণ্টার পুরনো হলে ফাঁকা) */
+    static String weatherText(Context c, double[] loc) {
+        try {
+            SharedPreferences p = c.getSharedPreferences("weather", Context.MODE_PRIVATE);
+            if (!p.contains("ts")) return "";
+            if (System.currentTimeMillis() - p.getLong("ts", 0) > 6 * 3600000L) return "";
+            if (Math.abs(Double.longBitsToDouble(p.getLong("lat", 0)) - loc[0]) > 0.5 || Math.abs(Double.longBitsToDouble(p.getLong("lng", 0)) - loc[1]) > 0.5) return "";
+            String d = wxDesc(p.getInt("code", -1));
+            return Islamic.bn(String.valueOf(p.getInt("temp", 0))) + "° " + d + " " + Islamic.bn(p.getInt("hum", 0) + "%");
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    /** বর্তমান জায়গার আবহাওয়া আনে (ব্যাকগ্রাউন্ড থ্রেডে ডাকতে হবে) */
+    static boolean fetchWeather(Context c) {
+        try {
+            double[] loc = location(c);
+            String u = "https://api.open-meteo.com/v1/forecast?latitude=" + loc[0] + "&longitude=" + loc[1]
+                    + "&current=temperature_2m,relative_humidity_2m,weather_code&timezone=auto";
+            java.net.HttpURLConnection h = (java.net.HttpURLConnection) new java.net.URL(u).openConnection();
+            h.setConnectTimeout(10000);
+            h.setReadTimeout(15000);
+            if (h.getResponseCode() != 200) return false;
+            java.io.BufferedReader br = new java.io.BufferedReader(new java.io.InputStreamReader(h.getInputStream(), "UTF-8"));
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = br.readLine()) != null) sb.append(line);
+            br.close();
+            JSONObject cur = new JSONObject(sb.toString()).getJSONObject("current");
+            c.getSharedPreferences("weather", Context.MODE_PRIVATE).edit()
+                    .putInt("temp", (int) Math.round(cur.getDouble("temperature_2m")))
+                    .putInt("hum", (int) Math.round(cur.optDouble("relative_humidity_2m", 0)))
+                    .putInt("code", cur.optInt("weather_code", -1))
+                    .putLong("lat", Double.doubleToLongBits(loc[0])).putLong("lng", Double.doubleToLongBits(loc[1]))
+                    .putLong("ts", System.currentTimeMillis()).apply();
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     /** টাকার অংক: ৳১২,৫০০ (বাংলা সংখ্যা) */
